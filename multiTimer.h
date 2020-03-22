@@ -141,9 +141,9 @@ void enableTimer(unsigned int *_timerName){
    if(index != -1){
    
       timerEnable[index] = true;
-      if(timerType[index] = ONDT ) *_timerName = 0;
+      if(timerType[index] == ONDT ) *_timerName = 0;
          
-      if(timerType[index] = TOGDT ) *_timerName = 0;
+      if(timerType[index] == TOGDT ) *_timerName = 0;
    }
 }
 
