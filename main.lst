@@ -1,0 +1,1101 @@
+CCS PCM C Compiler, Version 4.104, 5967               22-Mar-20 21:21
+
+               Filename: D:\working data\Microcontroller code\Multi_Timer\main.lst
+
+               ROM used: 888 words (11%)
+                         Largest free fragment is 2048
+               RAM used: 80 (22%) at main() level
+                         120 (33%) worst case
+               Stack:    3 worst case (2 in main + 1 for interrupts)
+
+*
+0000:  MOVLW  02
+0001:  MOVWF  0A
+0002:  GOTO   2B2
+0003:  NOP
+0004:  MOVWF  7F
+0005:  SWAPF  03,W
+0006:  CLRF   03
+0007:  MOVWF  21
+0008:  MOVF   0A,W
+0009:  MOVWF  20
+000A:  CLRF   0A
+000B:  MOVF   04,W
+000C:  MOVWF  22
+000D:  MOVF   77,W
+000E:  MOVWF  23
+000F:  MOVF   78,W
+0010:  MOVWF  24
+0011:  MOVF   79,W
+0012:  MOVWF  25
+0013:  MOVF   7A,W
+0014:  MOVWF  26
+0015:  BCF    03.7
+0016:  BCF    03.5
+0017:  MOVLW  8C
+0018:  MOVWF  04
+0019:  BTFSS  00.0
+001A:  GOTO   01D
+001B:  BTFSC  0C.0
+001C:  GOTO   02E
+001D:  MOVF   22,W
+001E:  MOVWF  04
+001F:  MOVF   23,W
+0020:  MOVWF  77
+0021:  MOVF   24,W
+0022:  MOVWF  78
+0023:  MOVF   25,W
+0024:  MOVWF  79
+0025:  MOVF   26,W
+0026:  MOVWF  7A
+0027:  MOVF   20,W
+0028:  MOVWF  0A
+0029:  SWAPF  21,W
+002A:  MOVWF  03
+002B:  SWAPF  7F,F
+002C:  SWAPF  7F,W
+002D:  RETFIE
+002E:  BCF    0A.3
+002F:  BCF    0A.4
+0030:  GOTO   031
+.................... #include "main.h" 
+.................... #include <16F877A.h> 
+.................... //////// Standard Header file for the PIC16F877A device //////////////// 
+.................... #device PIC16F877A 
+.................... #list 
+....................  
+.................... #device adc=8 
+....................  
+.................... #FUSES NOWDT                 	//No Watch Dog Timer 
+.................... #FUSES HS                    	//High speed Osc (> 4mhz for PCM/PCH) (>10mhz for PCD) 
+.................... #FUSES NOPUT                 	//No Power Up Timer 
+.................... #FUSES NOPROTECT             	//Code not protected from reading 
+.................... #FUSES NODEBUG               	//No Debug mode for ICD 
+.................... #FUSES NOBROWNOUT            	//No brownout reset 
+.................... #FUSES NOLVP                 	//No low voltage prgming, B3(PIC16) or B5(PIC18) used for I/O 
+.................... #FUSES NOCPD                 	//No EE protection 
+.................... #FUSES NOWRT                 	//Program memory not write protected 
+.................... #FUSES RESERVED              	//Used to set the reserved FUSE bits 
+....................  
+.................... #use delay(clock=20000000) 
+....................  
+....................  
+.................... #include "multiTimer.h" 
+.................... /***********************************PRECAUTION*********************************/ 
+.................... /*          This library was made by KienNV ©Chavaco.ltd, 2020                */ 
+.................... /*          This is a free library, feel free to use                          */ 
+.................... /* Follow folowing step to begin using this library                           */ 
+.................... /* Step1: include this library into your main.c     ex: #include "multiTimer.h*/ 
+.................... /* Step2: define a timer 1 interrupt routine like this                        */ 
+.................... /*                                                                            */ 
+.................... /*                void  TIMER1_isr(void)                                      */ 
+.................... /*                      {                                                     */ 
+.................... /*                         runTimerMng();                                     */ 
+.................... /*                                                                            */ 
+.................... /*                      }                                                     */ 
+.................... /*                                                                            */ 
+.................... /*Step3: insert presetup function into main: preSetupTimer();                 */ 
+.................... /*                                                                            */ 
+.................... /*                                                                            */ 
+.................... /*Step4: setup a timer: setupTimer(unsigned int *_timerNameAdd, unsigned int8 */ 
+.................... /*                      _timerType, unsigned int32 _timerValue,               */ 
+.................... /*                      int _timerPrecision);                                 */ 
+.................... /*                                                                            */ 
+.................... /*Step5: enable timer: enableTimer(unsigned int *_timerName);                 */ 
+.................... /*                                                                            */ 
+.................... /*                                                                            */ 
+.................... /*                                                                            */ 
+.................... /*Step6: to suspend timer using: disableTimer(unsigned int *_timerName);      */ 
+.................... /*                                                                            */ 
+.................... /******************************************************************************/ 
+....................  
+.................... //define max timer be created 
+.................... #define timerNum      5   //max timer will be created 
+.................... #define timerOffset  65230 // preset timer value to achive estimated time 10ms 
+.................... //define desision of timer 
+....................  
+.................... #define timer_10ms    1 
+.................... #define timer_100ms   10 
+.................... #define timer_1s      100 
+.................... #define timer_1m      6000 
+.................... //end define  
+....................  
+.................... //define type of timer 
+.................... #define ONDT   1 //on delay timer 
+.................... #define TOGDT  3 //tongle timer 
+.................... //end define 
+.................... unsigned int8           i;                // using for couting array's elements at timer1_isr 
+.................... volatile unsigned int8  nextSlot;         // next slot for new timer 
+.................... volatile unsigned int32 remainTime[timerNum];   //contain remaining time of timer 
+.................... int                     timerEnable[timerNum];  //contain timer enable command 
+.................... int                     timerRunning[timerNum]; //contain timer running state 
+.................... unsigned int            *timer[timerNum];        //contain timer fire bit 
+.................... volatile unsigned int32 timerValue[timerNum];   //contain set value of timer 
+.................... unsigned int8           timerType[timerNum];    //contain type of timer TOFF,TON,TOGL 
+....................  
+....................  
+.................... void runTimerMng(){ 
+....................       set_timer1(timerOffset); //10ms per interrupt 
+*
+0031:  MOVLW  FE
+0032:  MOVWF  0F
+0033:  MOVLW  CE
+0034:  MOVWF  0E
+....................    // 
+....................  
+....................    for(i = 0; i < timerNum; i++){ 
+0035:  CLRF   27
+0036:  MOVF   27,W
+0037:  SUBLW  04
+0038:  BTFSS  03.0
+0039:  GOTO   18E
+....................       if(timerEnable[i]){//check for timer enable 
+003A:  MOVLW  3D
+003B:  ADDWF  27,W
+003C:  MOVWF  04
+003D:  BCF    03.7
+003E:  MOVF   00,F
+003F:  BTFSC  03.2
+0040:  GOTO   18C
+....................          //check if timer is running or firered or standby 
+....................          if(timerRunning[i]){ 
+0041:  MOVLW  42
+0042:  ADDWF  27,W
+0043:  MOVWF  04
+0044:  BCF    03.7
+0045:  MOVF   00,F
+0046:  BTFSC  03.2
+0047:  GOTO   14F
+....................           
+....................             if(remainTime[i] > 0){ //timer is running 
+0048:  RLF    27,W
+0049:  MOVWF  77
+004A:  RLF    77,F
+004B:  MOVLW  FC
+004C:  ANDWF  77,F
+004D:  MOVF   77,W
+004E:  ADDLW  29
+004F:  MOVWF  04
+0050:  BCF    03.7
+0051:  MOVF   00,W
+0052:  BSF    03.5
+0053:  MOVWF  32
+0054:  INCF   04,F
+0055:  MOVF   00,W
+0056:  MOVWF  33
+0057:  INCF   04,F
+0058:  MOVF   00,W
+0059:  MOVWF  34
+005A:  INCF   04,F
+005B:  MOVF   00,W
+005C:  MOVWF  35
+005D:  MOVF   32,F
+005E:  BTFSS  03.2
+005F:  GOTO   069
+0060:  MOVF   33,F
+0061:  BTFSS  03.2
+0062:  GOTO   069
+0063:  MOVF   34,F
+0064:  BTFSS  03.2
+0065:  GOTO   069
+0066:  MOVF   35,F
+0067:  BTFSC  03.2
+0068:  GOTO   0C0
+....................                remainTime[i] = remainTime[i] - 1; 
+0069:  BCF    03.5
+006A:  RLF    27,W
+006B:  MOVWF  77
+006C:  RLF    77,F
+006D:  MOVLW  FC
+006E:  ANDWF  77,F
+006F:  MOVF   77,W
+0070:  ADDLW  29
+0071:  MOVWF  78
+0072:  CLRF   7A
+0073:  BTFSC  03.0
+0074:  INCF   7A,F
+0075:  MOVF   78,W
+0076:  BSF    03.5
+0077:  MOVWF  32
+0078:  MOVF   7A,W
+0079:  MOVWF  33
+007A:  BCF    03.5
+007B:  RLF    27,W
+007C:  MOVWF  77
+007D:  RLF    77,F
+007E:  MOVLW  FC
+007F:  ANDWF  77,F
+0080:  MOVF   77,W
+0081:  ADDLW  29
+0082:  MOVWF  04
+0083:  BCF    03.7
+0084:  MOVF   00,W
+0085:  BSF    03.5
+0086:  MOVWF  34
+0087:  INCF   04,F
+0088:  MOVF   00,W
+0089:  MOVWF  35
+008A:  INCF   04,F
+008B:  MOVF   00,W
+008C:  MOVWF  36
+008D:  INCF   04,F
+008E:  MOVF   00,W
+008F:  MOVWF  37
+0090:  MOVLW  FD
+0091:  ADDWF  04,F
+0092:  MOVLW  01
+0093:  SUBWF  34,W
+0094:  MOVWF  77
+0095:  MOVF   35,W
+0096:  MOVWF  78
+0097:  MOVLW  00
+0098:  BTFSS  03.0
+0099:  MOVLW  01
+009A:  SUBWF  78,F
+009B:  MOVF   36,W
+009C:  MOVWF  79
+009D:  MOVLW  00
+009E:  BTFSS  03.0
+009F:  MOVLW  01
+00A0:  SUBWF  79,F
+00A1:  MOVF   37,W
+00A2:  MOVWF  7A
+00A3:  MOVLW  00
+00A4:  BTFSS  03.0
+00A5:  MOVLW  01
+00A6:  SUBWF  7A,F
+00A7:  MOVF   7A,W
+00A8:  MOVWF  37
+00A9:  MOVF   79,W
+00AA:  MOVWF  36
+00AB:  MOVF   78,W
+00AC:  MOVWF  35
+00AD:  MOVF   77,W
+00AE:  MOVWF  34
+00AF:  MOVF   32,W
+00B0:  MOVWF  04
+00B1:  BCF    03.7
+00B2:  BTFSC  33.0
+00B3:  BSF    03.7
+00B4:  MOVF   34,W
+00B5:  MOVWF  00
+00B6:  INCF   04,F
+00B7:  MOVF   35,W
+00B8:  MOVWF  00
+00B9:  INCF   04,F
+00BA:  MOVF   36,W
+00BB:  MOVWF  00
+00BC:  INCF   04,F
+00BD:  MOVF   37,W
+00BE:  MOVWF  00
+....................                 
+....................             } 
+....................             else//timer firered 
+00BF:  GOTO   14D
+....................             { 
+....................                /*check type of timer 
+....................                if timer is repeatidly timer enable is not change 
+....................                if timer is ONDT or OFFDT then timer enable is set to false 
+....................                */ 
+....................                 
+....................                if(timerType[i] == ONDT){ 
+00C0:  MOVLW  65
+00C1:  BCF    03.5
+00C2:  ADDWF  27,W
+00C3:  MOVWF  04
+00C4:  BCF    03.7
+00C5:  DECFSZ 00,W
+00C6:  GOTO   0DF
+....................                   //disable timer 
+....................                   timerEnable[i] = false; 
+00C7:  MOVLW  3D
+00C8:  ADDWF  27,W
+00C9:  MOVWF  04
+00CA:  BCF    03.7
+00CB:  CLRF   00
+....................                   timerRunning = false; 
+00CC:  CLRF   43
+00CD:  CLRF   42
+....................                   //set firered bit 
+....................                   *timer[i] = 1;    
+00CE:  BCF    03.0
+00CF:  RLF    27,W
+00D0:  ADDLW  47
+00D1:  MOVWF  04
+00D2:  BCF    03.7
+00D3:  INCF   04,F
+00D4:  MOVF   00,W
+00D5:  MOVWF  7A
+00D6:  DECF   04,F
+00D7:  MOVF   00,W
+00D8:  MOVWF  04
+00D9:  BCF    03.7
+00DA:  BTFSC  7A.0
+00DB:  BSF    03.7
+00DC:  MOVLW  01
+00DD:  MOVWF  00
+....................                } 
+....................                 
+....................                else if(timerType[i] == TOGDT){            
+00DE:  GOTO   14E
+00DF:  MOVLW  65
+00E0:  ADDWF  27,W
+00E1:  MOVWF  04
+00E2:  BCF    03.7
+00E3:  MOVF   00,W
+00E4:  SUBLW  03
+00E5:  BTFSS  03.2
+00E6:  GOTO   14E
+....................                   //reverse firered bit 
+....................                   if(*timer[i] == 1) *timer[i] = 0; 
+00E7:  BCF    03.0
+00E8:  RLF    27,W
+00E9:  ADDLW  47
+00EA:  MOVWF  04
+00EB:  BCF    03.7
+00EC:  INCF   04,F
+00ED:  MOVF   00,W
+00EE:  MOVWF  7A
+00EF:  DECF   04,F
+00F0:  MOVF   00,W
+00F1:  MOVWF  04
+00F2:  BCF    03.7
+00F3:  BTFSC  7A.0
+00F4:  BSF    03.7
+00F5:  DECFSZ 00,W
+00F6:  GOTO   107
+00F7:  BCF    03.0
+00F8:  RLF    27,W
+00F9:  ADDLW  47
+00FA:  MOVWF  04
+00FB:  BCF    03.7
+00FC:  INCF   04,F
+00FD:  MOVF   00,W
+00FE:  MOVWF  7A
+00FF:  DECF   04,F
+0100:  MOVF   00,W
+0101:  MOVWF  04
+0102:  BCF    03.7
+0103:  BTFSC  7A.0
+0104:  BSF    03.7
+0105:  CLRF   00
+....................                   else *timer[i] = 1;     
+0106:  GOTO   117
+0107:  BCF    03.0
+0108:  RLF    27,W
+0109:  ADDLW  47
+010A:  MOVWF  04
+010B:  BCF    03.7
+010C:  INCF   04,F
+010D:  MOVF   00,W
+010E:  MOVWF  7A
+010F:  DECF   04,F
+0110:  MOVF   00,W
+0111:  MOVWF  04
+0112:  BCF    03.7
+0113:  BTFSC  7A.0
+0114:  BSF    03.7
+0115:  MOVLW  01
+0116:  MOVWF  00
+....................                   //recharge timer 
+....................                   remainTime[i] = timerValue[i]; 
+0117:  RLF    27,W
+0118:  MOVWF  77
+0119:  RLF    77,F
+011A:  MOVLW  FC
+011B:  ANDWF  77,F
+011C:  MOVF   77,W
+011D:  ADDLW  29
+011E:  MOVWF  78
+011F:  CLRF   7A
+0120:  BTFSC  03.0
+0121:  INCF   7A,F
+0122:  MOVF   78,W
+0123:  BSF    03.5
+0124:  MOVWF  32
+0125:  MOVF   7A,W
+0126:  MOVWF  33
+0127:  BCF    03.5
+0128:  RLF    27,W
+0129:  MOVWF  77
+012A:  RLF    77,F
+012B:  MOVLW  FC
+012C:  ANDWF  77,F
+012D:  MOVF   77,W
+012E:  ADDLW  51
+012F:  MOVWF  04
+0130:  BCF    03.7
+0131:  MOVF   00,W
+0132:  MOVWF  77
+0133:  INCF   04,F
+0134:  MOVF   00,W
+0135:  MOVWF  78
+0136:  INCF   04,F
+0137:  MOVF   00,W
+0138:  MOVWF  79
+0139:  INCF   04,F
+013A:  MOVF   00,W
+013B:  MOVWF  7A
+013C:  BSF    03.5
+013D:  MOVF   32,W
+013E:  MOVWF  04
+013F:  BCF    03.7
+0140:  BTFSC  33.0
+0141:  BSF    03.7
+0142:  MOVF   77,W
+0143:  MOVWF  00
+0144:  INCF   04,F
+0145:  MOVF   78,W
+0146:  MOVWF  00
+0147:  INCF   04,F
+0148:  MOVF   79,W
+0149:  MOVWF  00
+014A:  INCF   04,F
+014B:  MOVF   7A,W
+014C:  MOVWF  00
+014D:  BCF    03.5
+....................                } 
+....................                 
+....................               } 
+....................             } 
+....................          else{//timer is enabled but not running yet 
+014E:  GOTO   18C
+....................             //setting new remaining time equal to setting time 
+....................             remainTime[i] = timerValue[i]; 
+014F:  RLF    27,W
+0150:  MOVWF  77
+0151:  RLF    77,F
+0152:  MOVLW  FC
+0153:  ANDWF  77,F
+0154:  MOVF   77,W
+0155:  ADDLW  29
+0156:  MOVWF  78
+0157:  CLRF   7A
+0158:  BTFSC  03.0
+0159:  INCF   7A,F
+015A:  MOVF   78,W
+015B:  BSF    03.5
+015C:  MOVWF  32
+015D:  MOVF   7A,W
+015E:  MOVWF  33
+015F:  BCF    03.5
+0160:  RLF    27,W
+0161:  MOVWF  77
+0162:  RLF    77,F
+0163:  MOVLW  FC
+0164:  ANDWF  77,F
+0165:  MOVF   77,W
+0166:  ADDLW  51
+0167:  MOVWF  04
+0168:  BCF    03.7
+0169:  MOVF   00,W
+016A:  MOVWF  77
+016B:  INCF   04,F
+016C:  MOVF   00,W
+016D:  MOVWF  78
+016E:  INCF   04,F
+016F:  MOVF   00,W
+0170:  MOVWF  79
+0171:  INCF   04,F
+0172:  MOVF   00,W
+0173:  MOVWF  7A
+0174:  BSF    03.5
+0175:  MOVF   32,W
+0176:  MOVWF  04
+0177:  BCF    03.7
+0178:  BTFSC  33.0
+0179:  BSF    03.7
+017A:  MOVF   77,W
+017B:  MOVWF  00
+017C:  INCF   04,F
+017D:  MOVF   78,W
+017E:  MOVWF  00
+017F:  INCF   04,F
+0180:  MOVF   79,W
+0181:  MOVWF  00
+0182:  INCF   04,F
+0183:  MOVF   7A,W
+0184:  MOVWF  00
+....................             timerRunning[i] = true; 
+0185:  MOVLW  42
+0186:  BCF    03.5
+0187:  ADDWF  27,W
+0188:  MOVWF  04
+0189:  BCF    03.7
+018A:  MOVLW  01
+018B:  MOVWF  00
+....................          } 
+....................       } 
+....................    } 
+018C:  INCF   27,F
+018D:  GOTO   036
+.................... } 
+.................... void setupTimer(unsigned int *_timerNameAdd, unsigned int8 _timerType, unsigned int32 
+.................... _timerValue,int _timerPrecision){ 
+....................    if(nextSlot >= timerNum){}//there is no remaining slot for new timer, do nothing. 
+*
+01CC:  MOVF   28,W
+01CD:  SUBLW  04
+01CE:  BTFSS  03.0
+....................    else{ 
+01CF:  GOTO   263
+....................       timer[nextSlot] = _timerNameAdd;//save poiter to array 
+01D0:  BCF    03.0
+01D1:  RLF    28,W
+01D2:  ADDLW  47
+01D3:  MOVWF  04
+01D4:  BCF    03.7
+01D5:  INCF   04,F
+01D6:  MOVF   71,W
+01D7:  MOVWF  00
+01D8:  DECF   04,F
+01D9:  MOVF   70,W
+01DA:  MOVWF  00
+....................       timerType[nextSlot] = _timerType; 
+01DB:  MOVLW  65
+01DC:  ADDWF  28,W
+01DD:  MOVWF  04
+01DE:  BCF    03.7
+01DF:  MOVF   72,W
+01E0:  MOVWF  00
+....................       int32 calTimerValue; 
+....................       switch (_timerPrecision){ 
+01E1:  MOVF   7B,W
+01E2:  XORLW  01
+01E3:  BTFSC  03.2
+01E4:  GOTO   1EF
+01E5:  XORLW  0B
+01E6:  BTFSC  03.2
+01E7:  GOTO   1F9
+01E8:  XORLW  6E
+01E9:  BTFSC  03.2
+01EA:  GOTO   213
+01EB:  XORLW  14
+01EC:  BTFSC  03.2
+01ED:  GOTO   22D
+01EE:  GOTO   249
+....................          case timer_10ms://10ms equal to timer 1 cycle 
+....................             calTimerValue = _timerValue; 
+01EF:  MOVF   76,W
+01F0:  BSF    03.5
+01F1:  MOVWF  23
+01F2:  MOVF   75,W
+01F3:  MOVWF  22
+01F4:  MOVF   74,W
+01F5:  MOVWF  21
+01F6:  MOVF   73,W
+01F7:  MOVWF  20
+....................             break; 
+01F8:  GOTO   24B
+....................          case timer_100ms: 
+....................             calTimerValue = _timerValue * 10; 
+01F9:  MOVF   76,W
+01FA:  BSF    03.5
+01FB:  MOVWF  27
+01FC:  MOVF   75,W
+01FD:  MOVWF  26
+01FE:  MOVF   74,W
+01FF:  MOVWF  25
+0200:  MOVF   73,W
+0201:  MOVWF  24
+0202:  CLRF   2B
+0203:  CLRF   2A
+0204:  CLRF   29
+0205:  MOVLW  0A
+0206:  MOVWF  28
+0207:  BCF    03.5
+0208:  CALL   1A0
+0209:  MOVF   7A,W
+020A:  BSF    03.5
+020B:  MOVWF  23
+020C:  MOVF   79,W
+020D:  MOVWF  22
+020E:  MOVF   78,W
+020F:  MOVWF  21
+0210:  MOVF   77,W
+0211:  MOVWF  20
+....................             break; 
+0212:  GOTO   24B
+....................          case timer_1s: 
+....................             calTimerValue = _timerValue * 100; 
+0213:  MOVF   76,W
+0214:  BSF    03.5
+0215:  MOVWF  27
+0216:  MOVF   75,W
+0217:  MOVWF  26
+0218:  MOVF   74,W
+0219:  MOVWF  25
+021A:  MOVF   73,W
+021B:  MOVWF  24
+021C:  CLRF   2B
+021D:  CLRF   2A
+021E:  CLRF   29
+021F:  MOVLW  64
+0220:  MOVWF  28
+0221:  BCF    03.5
+0222:  CALL   1A0
+0223:  MOVF   7A,W
+0224:  BSF    03.5
+0225:  MOVWF  23
+0226:  MOVF   79,W
+0227:  MOVWF  22
+0228:  MOVF   78,W
+0229:  MOVWF  21
+022A:  MOVF   77,W
+022B:  MOVWF  20
+....................             break; 
+022C:  GOTO   24B
+....................          case timer_1m: 
+....................             calTimerValue = _timerValue * 6000; 
+022D:  MOVF   76,W
+022E:  BSF    03.5
+022F:  MOVWF  27
+0230:  MOVF   75,W
+0231:  MOVWF  26
+0232:  MOVF   74,W
+0233:  MOVWF  25
+0234:  MOVF   73,W
+0235:  MOVWF  24
+0236:  CLRF   2B
+0237:  CLRF   2A
+0238:  MOVLW  17
+0239:  MOVWF  29
+023A:  MOVLW  70
+023B:  MOVWF  28
+023C:  BCF    03.5
+023D:  CALL   1A0
+023E:  MOVF   7A,W
+023F:  BSF    03.5
+0240:  MOVWF  23
+0241:  MOVF   79,W
+0242:  MOVWF  22
+0243:  MOVF   78,W
+0244:  MOVWF  21
+0245:  MOVF   77,W
+0246:  MOVWF  20
+....................             break; 
+0247:  GOTO   24B
+0248:  BCF    03.5
+....................          default:  
+....................             break; 
+0249:  BSF    03.5
+024A:  GOTO   24B
+....................       } 
+....................       timerValue[nextSlot] = calTimerValue; 
+024B:  BCF    03.5
+024C:  RLF    28,W
+024D:  MOVWF  77
+024E:  RLF    77,F
+024F:  MOVLW  FC
+0250:  ANDWF  77,F
+0251:  MOVF   77,W
+0252:  ADDLW  51
+0253:  MOVWF  04
+0254:  BCF    03.7
+0255:  BSF    03.5
+0256:  MOVF   20,W
+0257:  MOVWF  00
+0258:  INCF   04,F
+0259:  MOVF   21,W
+025A:  MOVWF  00
+025B:  INCF   04,F
+025C:  MOVF   22,W
+025D:  MOVWF  00
+025E:  INCF   04,F
+025F:  MOVF   23,W
+0260:  MOVWF  00
+....................       nextSlot++; 
+0261:  BCF    03.5
+0262:  INCF   28,F
+....................    } 
+.................... } 
+0263:  RETURN
+.................... int findTimerIndex(unsigned int *_timerName){ //find index of timer in declared timer array 
+....................    int k; 
+....................    for(k=0; k < timerNum; k++){ 
+*
+0268:  CLRF   75
+0269:  MOVF   75,W
+026A:  SUBLW  04
+026B:  BTFSS  03.0
+026C:  GOTO   285
+....................       if(timer[k] == _timerName){ 
+026D:  BCF    03.0
+026E:  RLF    75,W
+026F:  ADDLW  47
+0270:  MOVWF  04
+0271:  BCF    03.7
+0272:  INCF   04,F
+0273:  MOVF   00,W
+0274:  MOVWF  7C
+0275:  DECF   04,F
+0276:  MOVF   00,W
+0277:  MOVWF  7B
+0278:  MOVF   73,W
+0279:  SUBWF  7B,W
+027A:  BTFSS  03.2
+027B:  GOTO   283
+027C:  MOVF   74,W
+027D:  SUBWF  7C,W
+027E:  BTFSS  03.2
+027F:  GOTO   283
+....................           
+....................          return k; 
+0280:  MOVF   75,W
+0281:  MOVWF  78
+0282:  GOTO   287
+....................       } 
+....................    } 
+0283:  INCF   75,F
+0284:  GOTO   269
+....................    return -1; 
+0285:  MOVLW  FF
+0286:  MOVWF  78
+.................... } 
+....................  
+.................... void enableTimer(unsigned int *_timerName){ 
+*
+0264:  MOVF   71,W
+0265:  MOVWF  74
+0266:  MOVF   70,W
+0267:  MOVWF  73
+*
+0287:  MOVF   78,W
+0288:  MOVWF  72
+....................    int index = findTimerIndex(_timerName); 
+....................    //set timer enable 
+....................    if(index != -1){ 
+0289:  MOVF   72,W
+028A:  SUBLW  FF
+028B:  BTFSC  03.2
+028C:  GOTO   2B1
+....................     
+....................       timerEnable[index] = true; 
+028D:  MOVLW  3D
+028E:  ADDWF  72,W
+028F:  MOVWF  04
+0290:  BCF    03.7
+0291:  MOVLW  01
+0292:  MOVWF  00
+....................       if(timerType[index] = ONDT ) *_timerName = 0; 
+0293:  MOVLW  65
+0294:  ADDWF  72,W
+0295:  MOVWF  04
+0296:  BCF    03.7
+0297:  MOVLW  01
+0298:  MOVWF  00
+0299:  XORLW  00
+029A:  BTFSC  03.2
+029B:  GOTO   2A2
+029C:  MOVF   70,W
+029D:  MOVWF  04
+029E:  BCF    03.7
+029F:  BTFSC  71.0
+02A0:  BSF    03.7
+02A1:  CLRF   00
+....................           
+....................       if(timerType[index] = TOGDT ) *_timerName = 0; 
+02A2:  MOVLW  65
+02A3:  ADDWF  72,W
+02A4:  MOVWF  04
+02A5:  BCF    03.7
+02A6:  MOVLW  03
+02A7:  MOVWF  00
+02A8:  XORLW  00
+02A9:  BTFSC  03.2
+02AA:  GOTO   2B1
+02AB:  MOVF   70,W
+02AC:  MOVWF  04
+02AD:  BCF    03.7
+02AE:  BTFSC  71.0
+02AF:  BSF    03.7
+02B0:  CLRF   00
+....................    } 
+.................... } 
+02B1:  RETURN
+....................  
+.................... void disableTimer(unsigned int *_timerName){ 
+....................    int index = findTimerIndex(_timerName); 
+....................    //set timer enable 
+....................    if(index != -1) { 
+....................       timerEnable[index] = false; 
+....................       timerRunning[index] = false; 
+....................    } 
+.................... } 
+.................... void preSetupTimer(){ 
+....................    setup_timer_1(T1_INTERNAL|T1_DIV_BY_8); 
+*
+0192:  MOVLW  B5
+0193:  MOVWF  10
+....................    set_timer1(timerOffset); 
+0194:  MOVLW  FE
+0195:  MOVWF  0F
+0196:  MOVLW  CE
+0197:  MOVWF  0E
+....................    enable_interrupts(INT_TIMER1); 
+0198:  BSF    03.5
+0199:  BSF    0C.0
+....................    enable_interrupts(GlOBAL); 
+019A:  MOVLW  C0
+019B:  BCF    03.5
+019C:  IORWF  0B,F
+.................... } 
+019D:  BCF    0A.3
+019E:  BCF    0A.4
+019F:  GOTO   2C1 (RETURN)
+....................  
+....................  
+.................... #int_TIMER1 
+....................  
+.................... void  TIMER1_isr(void)  
+.................... { 
+....................    runTimerMng(); 
+....................     
+.................... } 
+....................  
+.................... //main  
+*
+018E:  BCF    0C.0
+018F:  BCF    0A.3
+0190:  BCF    0A.4
+0191:  GOTO   01D
+.................... void main() 
+.................... { 
+*
+02B2:  CLRF   04
+02B3:  BCF    03.7
+02B4:  MOVLW  1F
+02B5:  ANDWF  03,F
+02B6:  BSF    03.5
+02B7:  BSF    1F.0
+02B8:  BSF    1F.1
+02B9:  BSF    1F.2
+02BA:  BCF    1F.3
+02BB:  MOVLW  07
+02BC:  MOVWF  1C
+....................    //pre setup multi timer 
+....................    preSetupTimer(); 
+*
+02C0:  GOTO   192
+....................     
+....................    //set input output 
+....................    set_tris_c(0x00); 
+02C1:  MOVLW  00
+02C2:  BSF    03.5
+02C3:  MOVWF  07
+02C4:  BCF    03.5
+02C5:  MOVWF  6A
+....................    set_tris_b(0x00); 
+02C6:  BSF    03.5
+02C7:  MOVWF  06
+....................    OUTPUT_c(0x00); 
+02C8:  BCF    03.5
+02C9:  MOVWF  6A
+02CA:  BSF    03.5
+02CB:  CLRF   07
+02CC:  BCF    03.5
+02CD:  CLRF   07
+....................     
+....................    //define timer 
+....................    int timer1S,timer2S,timer3S,timer4S,timer5S; 
+....................    setupTimer(&timer1S,TOGDT,100,1); 
+02CE:  CLRF   71
+02CF:  MOVLW  6B
+02D0:  MOVWF  70
+02D1:  MOVLW  03
+02D2:  MOVWF  72
+02D3:  CLRF   76
+02D4:  CLRF   75
+02D5:  CLRF   74
+02D6:  MOVLW  64
+02D7:  MOVWF  73
+02D8:  MOVLW  01
+02D9:  MOVWF  7B
+02DA:  CALL   1CC
+....................    setupTimer(&timer2S,TOGDT,200,1); 
+02DB:  CLRF   71
+02DC:  MOVLW  6C
+02DD:  MOVWF  70
+02DE:  MOVLW  03
+02DF:  MOVWF  72
+02E0:  CLRF   76
+02E1:  CLRF   75
+02E2:  CLRF   74
+02E3:  MOVLW  C8
+02E4:  MOVWF  73
+02E5:  MOVLW  01
+02E6:  MOVWF  7B
+02E7:  CALL   1CC
+....................    setupTimer(&timer3S,TOGDT,300,1); 
+02E8:  CLRF   71
+02E9:  MOVLW  6D
+02EA:  MOVWF  70
+02EB:  MOVLW  03
+02EC:  MOVWF  72
+02ED:  CLRF   76
+02EE:  CLRF   75
+02EF:  MOVLW  01
+02F0:  MOVWF  74
+02F1:  MOVLW  2C
+02F2:  MOVWF  73
+02F3:  MOVLW  01
+02F4:  MOVWF  7B
+02F5:  CALL   1CC
+....................    setupTimer(&timer4S,TOGDT,400,1); 
+02F6:  CLRF   71
+02F7:  MOVLW  6E
+02F8:  MOVWF  70
+02F9:  MOVLW  03
+02FA:  MOVWF  72
+02FB:  CLRF   76
+02FC:  CLRF   75
+02FD:  MOVLW  01
+02FE:  MOVWF  74
+02FF:  MOVLW  90
+0300:  MOVWF  73
+0301:  MOVLW  01
+0302:  MOVWF  7B
+0303:  CALL   1CC
+....................    setupTimer(&timer5S,TOGDT,300,1); 
+0304:  CLRF   71
+0305:  MOVLW  6F
+0306:  MOVWF  70
+0307:  MOVLW  03
+0308:  MOVWF  72
+0309:  CLRF   76
+030A:  CLRF   75
+030B:  MOVLW  01
+030C:  MOVWF  74
+030D:  MOVLW  2C
+030E:  MOVWF  73
+030F:  MOVLW  01
+0310:  MOVWF  7B
+0311:  CALL   1CC
+....................     
+....................    //enable timer 
+....................    enableTimer(&timer1S); 
+0312:  CLRF   71
+0313:  MOVLW  6B
+0314:  MOVWF  70
+0315:  CALL   264
+....................    enableTimer(&timer2S); 
+0316:  CLRF   71
+0317:  MOVLW  6C
+0318:  MOVWF  70
+0319:  CALL   264
+....................    enableTimer(&timer3S); 
+031A:  CLRF   71
+031B:  MOVLW  6D
+031C:  MOVWF  70
+031D:  CALL   264
+....................    enableTimer(&timer4S); 
+031E:  CLRF   71
+031F:  MOVLW  6E
+0320:  MOVWF  70
+0321:  CALL   264
+....................    enableTimer(&timer5S); 
+0322:  CLRF   71
+0323:  MOVLW  6F
+0324:  MOVWF  70
+0325:  CALL   264
+....................     
+....................    //forever loop 
+....................    while(true){ 
+....................       if(timer1S)output_high(PIN_C0); 
+0326:  MOVF   6B,F
+0327:  BTFSC  03.2
+0328:  GOTO   330
+0329:  BCF    6A.0
+032A:  MOVF   6A,W
+032B:  BSF    03.5
+032C:  MOVWF  07
+032D:  BCF    03.5
+032E:  BSF    07.0
+....................       else output_low(PIN_C0); 
+032F:  GOTO   336
+0330:  BCF    6A.0
+0331:  MOVF   6A,W
+0332:  BSF    03.5
+0333:  MOVWF  07
+0334:  BCF    03.5
+0335:  BCF    07.0
+....................       if(timer2S) output_high(PIN_C1); 
+0336:  MOVF   6C,F
+0337:  BTFSC  03.2
+0338:  GOTO   340
+0339:  BCF    6A.1
+033A:  MOVF   6A,W
+033B:  BSF    03.5
+033C:  MOVWF  07
+033D:  BCF    03.5
+033E:  BSF    07.1
+....................       else output_low(PIN_C1); 
+033F:  GOTO   346
+0340:  BCF    6A.1
+0341:  MOVF   6A,W
+0342:  BSF    03.5
+0343:  MOVWF  07
+0344:  BCF    03.5
+0345:  BCF    07.1
+....................       if(timer3S) output_high(pin_C2); 
+0346:  MOVF   6D,F
+0347:  BTFSC  03.2
+0348:  GOTO   350
+0349:  BCF    6A.2
+034A:  MOVF   6A,W
+034B:  BSF    03.5
+034C:  MOVWF  07
+034D:  BCF    03.5
+034E:  BSF    07.2
+....................       else output_low(PIN_C2); 
+034F:  GOTO   356
+0350:  BCF    6A.2
+0351:  MOVF   6A,W
+0352:  BSF    03.5
+0353:  MOVWF  07
+0354:  BCF    03.5
+0355:  BCF    07.2
+....................       if(timer4S) output_high(pin_C3); 
+0356:  MOVF   6E,F
+0357:  BTFSC  03.2
+0358:  GOTO   360
+0359:  BCF    6A.3
+035A:  MOVF   6A,W
+035B:  BSF    03.5
+035C:  MOVWF  07
+035D:  BCF    03.5
+035E:  BSF    07.3
+....................       else output_low(PIN_C3); 
+035F:  GOTO   366
+0360:  BCF    6A.3
+0361:  MOVF   6A,W
+0362:  BSF    03.5
+0363:  MOVWF  07
+0364:  BCF    03.5
+0365:  BCF    07.3
+....................       if(timer5S) output_high(pin_C4); 
+0366:  MOVF   6F,F
+0367:  BTFSC  03.2
+0368:  GOTO   370
+0369:  BCF    6A.4
+036A:  MOVF   6A,W
+036B:  BSF    03.5
+036C:  MOVWF  07
+036D:  BCF    03.5
+036E:  BSF    07.4
+....................       else output_low(PIN_C4); 
+036F:  GOTO   376
+0370:  BCF    6A.4
+0371:  MOVF   6A,W
+0372:  BSF    03.5
+0373:  MOVWF  07
+0374:  BCF    03.5
+0375:  BCF    07.4
+....................    } 
+0376:  GOTO   326
+.................... } 
+....................  
+0377:  SLEEP
+
+Configuration Fuses:
+   Word  1: 3F3A   HS NOWDT NOPUT NODEBUG NOPROTECT NOBROWNOUT NOLVP NOCPD NOWRT
